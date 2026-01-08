@@ -162,7 +162,6 @@ html, body {
 .viewerWrap {
   position: relative;
   overflow: hidden;
-  height: 100%;
 }
 
 .viewer {
@@ -231,7 +230,7 @@ html, body {
 
 .segmented {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;

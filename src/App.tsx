@@ -21,7 +21,7 @@ import {
 } from './lib/assets';
 
 type AssetMap = Record<string, (StoredAsset & { url: string })>; // by sceneId
-type HotspotMode = 'info' | 'link';
+type HotspotMode = 'navigate' | 'info' | 'link';
 
 export default function App() {
   const [project, setProject] = useState<OrbitryProject>(() => createEmptyProject('Orbitry MVP'));
@@ -32,7 +32,9 @@ export default function App() {
   const [importStatus, setImportStatus] = useState<string>('');
   const [toast, setToast] = useState<string | null>(null);
 
-  const [hotspotMode, setHotspotMode] = useState<HotspotMode>('info');
+  // Default to navigation so the user can immediately drag to look around
+  // without accidentally placing hotspots.
+  const [hotspotMode, setHotspotMode] = useState<HotspotMode>('navigate');
   const [linkTargetSceneId, setLinkTargetSceneId] = useState<string | null>(null);
   const [selectedHotspotId, setSelectedHotspotId] = useState<string | null>(null);
 
@@ -358,7 +360,14 @@ export default function App() {
             </div>
 
             <div style={{ marginTop: 10 }}>
-              <div className="segmented" aria-label="Hotspot mode">
+              <div className="segmented" aria-label="Interaction mode">
+                <button
+                  className={`segBtn ${hotspotMode === 'navigate' ? 'active' : ''}`}
+                  onClick={() => setHotspotMode('navigate')}
+                  disabled={!selectedScene}
+                >
+                  Move
+                </button>
                 <button
                   className={`segBtn ${hotspotMode === 'info' ? 'active' : ''}`}
                   onClick={() => setHotspotMode('info')}
@@ -375,7 +384,11 @@ export default function App() {
                 </button>
               </div>
 
-              {hotspotMode === 'link' ? (
+              {hotspotMode === 'navigate' ? (
+                <div className="small" style={{ marginTop: 10 }}>
+                  Drag to look around. Switch to <strong>Info</strong> or <strong>Link</strong> to place hotspots.
+                </div>
+              ) : hotspotMode === 'link' ? (
                 <div style={{ marginTop: 10 }}>
                   <div className="fieldLabel">Link target</div>
                   <select
@@ -396,7 +409,7 @@ export default function App() {
                 </div>
               ) : (
                 <div className="small" style={{ marginTop: 10 }}>
-                  Place an <strong>info hotspot</strong>: click inside the panorama.
+                  Place an <strong>info hotspot</strong>: click (don’t drag) inside the panorama.
                 </div>
               )}
             </div>
@@ -487,6 +500,7 @@ export default function App() {
             hotspots={selectedScene?.hotspots ?? []}
             onClickInViewer={(coords) => {
               if (!selectedScene) return;
+              if (hotspotMode === 'navigate') return;
               if (hotspotMode === 'link') addLinkHotspot(coords.yaw, coords.pitch);
               else addInfoHotspot(coords.yaw, coords.pitch);
             }}

@@ -8,8 +8,8 @@ type Props = {
   panoramaUrl?: string;
   /** Hotspots to render for the current scene. */
   hotspots?: OrbitryHotspot[];
-  onClickInViewer?: (coords: { yaw: number; pitch: number }, ev: MouseEvent) => void;
-  onLinkHotspotClick?: (targetSceneId: string, ev: MouseEvent) => void;
+  onClickInViewer?: (coords: { yaw: number; pitch: number }, ev: MouseEvent | PointerEvent) => void;
+  onLinkHotspotClick?: (targetSceneId: string, ev: MouseEvent | PointerEvent) => void;
 };
 
 export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onClickInViewer, onLinkHotspotClick }: Props) {
@@ -96,9 +96,16 @@ export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onC
           ev.stopPropagation();
           onLinkHotspotClick?.(h.targetSceneId, ev);
         });
+
+        // Prevent pointer-based click-to-add from firing when clicking a hotspot.
+        el.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+        el.addEventListener('pointerup', (ev) => ev.stopPropagation());
       } else {
         // Info hotspot: stopPropagation so it doesn't create a new one.
         el.addEventListener('click', (ev) => ev.stopPropagation());
+
+        el.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+        el.addEventListener('pointerup', (ev) => ev.stopPropagation());
       }
 
       container.createHotspot(el, { yaw: h.yaw, pitch: h.pitch });
@@ -106,13 +113,49 @@ export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onC
     });
   }, [hotspots, scene?.id]);
 
-  // Click-to-add.
+  // Click-to-add (but not on drag).
   useEffect(() => {
     const root = containerRef.current;
     if (!root) return;
 
-    const handler = (ev: MouseEvent) => {
+    const MOVE_PX = 6; // threshold to treat as drag, not click
+    let down:
+      | {
+          pointerId: number;
+          x: number;
+          y: number;
+          moved: boolean;
+        }
+      | null = null;
+
+    const onDown = (ev: PointerEvent) => {
       if (!onClickInViewer) return;
+      if (ev.button !== 0) return; // only left click / primary
+      down = { pointerId: ev.pointerId, x: ev.clientX, y: ev.clientY, moved: false };
+    };
+
+    const onMove = (ev: PointerEvent) => {
+      if (!down) return;
+      if (ev.pointerId !== down.pointerId) return;
+      const dx = ev.clientX - down.x;
+      const dy = ev.clientY - down.y;
+      if ((dx * dx + dy * dy) >= MOVE_PX * MOVE_PX) down.moved = true;
+    };
+
+    const onUpOrCancel = (ev: PointerEvent) => {
+      if (!down) return;
+      if (ev.pointerId !== down.pointerId) return;
+
+      const wasClick = !down.moved;
+      down = null;
+
+      if (!wasClick) return;
+      if (!onClickInViewer) return;
+
+      // If the user clicked on a hotspot element, do nothing (navigation / stopPropagation already handled).
+      const t = ev.target as HTMLElement | null;
+      if (t?.closest?.('.hotspotDot')) return;
+
       const mScene = currentSceneRef.current;
       if (!mScene) return;
       const view = mScene.view();
@@ -125,8 +168,17 @@ export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onC
       onClickInViewer({ yaw: coords.yaw, pitch: coords.pitch }, ev);
     };
 
-    root.addEventListener('click', handler);
-    return () => root.removeEventListener('click', handler);
+    root.addEventListener('pointerdown', onDown);
+    root.addEventListener('pointermove', onMove);
+    root.addEventListener('pointerup', onUpOrCancel);
+    root.addEventListener('pointercancel', onUpOrCancel);
+
+    return () => {
+      root.removeEventListener('pointerdown', onDown);
+      root.removeEventListener('pointermove', onMove);
+      root.removeEventListener('pointerup', onUpOrCancel);
+      root.removeEventListener('pointercancel', onUpOrCancel);
+    };
   }, [onClickInViewer]);
 
   return (
@@ -138,7 +190,7 @@ export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onC
           <div style={{ marginTop: 6 }}>
             {isReady ? (
               <>
-                Click in the panorama to add a hotspot (Info or Link — choose in sidebar).
+                Drag to look around. Switch to <strong>Info</strong> or <strong>Link</strong> in the sidebar to place hotspots.
               </>
             ) : (
               <>Import a 360 equirectangular image (2:1) to start.</>
