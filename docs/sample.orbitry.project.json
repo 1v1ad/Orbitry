@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "createdAt": "2026-01-08T00:00:00.000Z",
+  "updatedAt": "2026-01-08T00:00:00.000Z",
+  "title": "Sample Tour",
+  "scenes": [
+    {
+      "id": "scene_living",
+      "name": "Living room",
+      "panorama": {
+        "type": "equirect",
+        "label": "Insta360 X3",
+        "fileName": "living_room.jpg",
+        "width": 12000,
+        "height": 6000
+      },
+      "initialView": {
+        "yaw": 0,
+        "pitch": 0,
+        "fov": 1.25
+      },
+      "hotspots": [
+        {
+          "id": "hs_1",
+          "type": "info",
+          "yaw": 0.3,
+          "pitch": -0.05,
+          "title": "Window",
+          "text": "Nice view"
+        },
+        {
+          "id": "hs_2",
+          "type": "link",
+          "yaw": -1.1,
+          "pitch": 0.02,
+          "targetSceneId": "scene_kitchen"
+        }
+      ]
+    },
+    {
+      "id": "scene_kitchen",
+      "name": "Kitchen",
+      "panorama": {
+        "type": "equirect",
+        "fileName": "kitchen.jpg",
+        "width": 12000,
+        "height": 6000
+      },
+      "initialView": {
+        "yaw": 0,
+        "pitch": 0,
+        "fov": 1.25
+      },
+      "hotspots": []
+    }
+  ]
+}

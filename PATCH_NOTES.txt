@@ -1,0 +1,20 @@
+Orbitry MVP v0.0.1
+
+What you get
+- Vite + React + TypeScript project (single-app repo root)
+- Marzipano viewer embedded
+- Import equirect panoramas (2:1) as scenes
+- Click in viewer to add info hotspots
+- Save/Load Orbitry project JSON (assets not embedded yet)
+- Netlify deploy ready (netlify.toml, dist publish)
+
+Key files
+- src/lib/project.ts (Orbitry project format v1)
+- src/components/MarzipanoViewer.tsx (viewer wrapper + hotspot rendering)
+- src/App.tsx (editor shell)
+- docs/format_v1.md
+
+Next
+- Link hotspots
+- Import Marzipano Tool exports (APP_DATA)
+- Export standalone tour bundle (fast + optimized)
