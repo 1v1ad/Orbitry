@@ -162,6 +162,7 @@ html, body {
 .viewerWrap {
   position: relative;
   overflow: hidden;
+  height: 100%;
 }
 
 .viewer {
