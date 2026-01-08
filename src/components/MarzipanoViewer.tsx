@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import Marzipano from 'marzipano';
 import type { OrbitryHotspot, OrbitryScene, OrbitryViewParameters } from '../lib/project';
 

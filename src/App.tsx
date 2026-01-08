@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import MarzipanoViewer from './components/MarzipanoViewer';
 import {
   assertIsProject,
