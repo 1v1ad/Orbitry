@@ -101,7 +101,7 @@ async function decodeImageToBitmap(file: File): Promise<{ bitmap: ImageBitmap; r
       img.onload = () => resolve();
       img.onerror = () => reject(new Error('Failed to decode image'));
     });
-    // @ts-expect-error - createImageBitmap works with HTMLImageElement in modern browsers.
+    // createImageBitmap works with HTMLImageElement in modern browsers.
     const bitmap = await createImageBitmap(img);
     return { bitmap, revoke: () => URL.revokeObjectURL(url) };
   }
