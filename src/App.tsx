@@ -7,16 +7,34 @@ import {
   uid,
   type OrbitryProject,
   type OrbitryScene,
-  type OrbitryHotspot
+  type OrbitryHotspot,
+  type OrbitryInfoHotspot,
+  type OrbitryLinkHotspot
 } from './lib/project';
 import { downloadText } from './lib/download';
+import {
+  getSafeMaxTextureSize,
+  loadAssetFromIdb,
+  processEquirectToSafeBlob,
+  saveAssetToIdb,
+  type StoredAsset
+} from './lib/assets';
 
-type AssetMap = Record<string, { file: File; url: string }>; // by sceneId
+type AssetMap = Record<string, (StoredAsset & { url: string })>; // by sceneId
+type HotspotMode = 'info' | 'link';
 
 export default function App() {
   const [project, setProject] = useState<OrbitryProject>(() => createEmptyProject('Orbitry MVP'));
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
   const [assets, setAssets] = useState<AssetMap>({});
+
+  const [importing, setImporting] = useState(false);
+  const [importStatus, setImportStatus] = useState<string>('');
+  const [toast, setToast] = useState<string | null>(null);
+
+  const [hotspotMode, setHotspotMode] = useState<HotspotMode>('info');
+  const [linkTargetSceneId, setLinkTargetSceneId] = useState<string | null>(null);
+  const [selectedHotspotId, setSelectedHotspotId] = useState<string | null>(null);
 
   const importPanoramaInputRef = useRef<HTMLInputElement | null>(null);
   const loadProjectInputRef = useRef<HTMLInputElement | null>(null);
@@ -28,43 +46,62 @@ export default function App() {
   const onImportPanoramaClick = () => importPanoramaInputRef.current?.click();
   const onLoadProjectClick = () => loadProjectInputRef.current?.click();
 
-  async function inferImageSize(file: File): Promise<{ width?: number; height?: number }> {
-    try {
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      const p = new Promise<{ width: number; height: number }>((resolve, reject) => {
-        img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-        img.onerror = () => reject(new Error('Failed to load image'));
-      });
-      img.src = url;
-      const { width, height } = await p;
-      URL.revokeObjectURL(url);
-      return { width, height };
-    } catch {
-      return {};
-    }
+  function showToast(msg: string) {
+    setToast(msg);
+    window.clearTimeout((showToast as any)._t);
+    (showToast as any)._t = window.setTimeout(() => setToast(null), 2800);
+  }
+
+  function upsertAsset(sceneId: string, asset: StoredAsset) {
+    setAssets((prev) => {
+      const next = { ...prev };
+      const prevAsset = next[sceneId];
+      if (prevAsset?.url) {
+        try {
+          URL.revokeObjectURL(prevAsset.url);
+        } catch {
+          // ignore
+        }
+      }
+      const url = URL.createObjectURL(asset.blob);
+      next[sceneId] = { ...asset, url };
+      return next;
+    });
   }
 
   async function handleImportFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
 
-    const newScenes: OrbitryScene[] = [];
-    const newAssets: AssetMap = {};
+    setImporting(true);
+    setImportStatus('Preparing…');
 
+    const safeMax = await getSafeMaxTextureSize();
+    const newScenes: OrbitryScene[] = [];
+
+    let idx = 0;
     for (const file of Array.from(files)) {
+      idx += 1;
+      setImportStatus(`Processing ${idx}/${files.length}: ${file.name}`);
+
+      // Decode & (if needed) downscale to a safe size for WebGL.
+      const { blob, width, height, originalWidth, originalHeight, fileName } = await processEquirectToSafeBlob(file, {
+        forceMaxSize: safeMax,
+        mime: 'image/jpeg',
+        quality: 0.9
+      });
+
       const id = uid('scene');
       const baseName = file.name.replace(/\.[^/.]+$/, '');
-      const { width, height } = await inferImageSize(file);
 
       const scene: OrbitryScene = {
         id,
         name: baseName || `Scene ${project.scenes.length + newScenes.length + 1}`,
         panorama: {
           type: 'equirect',
-          label: 'Imported equirect',
-          fileName: file.name,
-          width,
-          height
+          label: originalWidth !== width ? `Imported (scaled to ${width}×${height})` : 'Imported equirect',
+          fileName: fileName,
+          width: originalWidth,
+          height: originalHeight
         },
         initialView: {
           yaw: 0,
@@ -74,15 +111,37 @@ export default function App() {
         hotspots: []
       };
 
-      const url = URL.createObjectURL(file);
-      newAssets[id] = { file, url };
+      const stored: StoredAsset = {
+        sceneId: id,
+        fileName,
+        blob,
+        width,
+        height,
+        originalWidth,
+        originalHeight,
+        updatedAt: new Date().toISOString()
+      };
+
+      await saveAssetToIdb(stored);
+      upsertAsset(id, stored);
       newScenes.push(scene);
     }
 
-    setAssets((prev) => ({ ...prev, ...newAssets }));
     setProject((prev) => touchProject({ ...prev, scenes: [...prev.scenes, ...newScenes] }));
 
     if (!selectedSceneId && newScenes.length > 0) setSelectedSceneId(newScenes[0].id);
+
+    // Default link target to the first other scene.
+    if (newScenes.length > 0) {
+      const firstSceneId = (selectedSceneId ?? newScenes[0].id);
+      const all = [...project.scenes, ...newScenes].map((s) => s.id);
+      const other = all.find((id) => id !== firstSceneId) ?? null;
+      if (!linkTargetSceneId) setLinkTargetSceneId(other);
+    }
+
+    setImporting(false);
+    setImportStatus('');
+    showToast('Panorama imported ✅');
   }
 
   function saveProject() {
@@ -95,21 +154,33 @@ export default function App() {
     const data = JSON.parse(text);
     assertIsProject(data);
 
-    // Note: assets are not embedded in the project file in MVP.
-    // We load the structure and keep any already-imported images (if ids match).
     setProject(data);
     setSelectedSceneId(data.scenes[0]?.id ?? null);
+    setSelectedHotspotId(null);
+
+    // Try to rehydrate assets from IndexedDB (local-first behaviour).
+    for (const s of data.scenes) {
+      const asset = await loadAssetFromIdb(s.id);
+      if (asset) upsertAsset(s.id, asset);
+    }
+
+    // Pick a sane default link target.
+    const firstId = data.scenes[0]?.id ?? null;
+    const other = data.scenes.find((s) => s.id !== firstId)?.id ?? null;
+    setLinkTargetSceneId(other);
+
+    showToast('Project loaded ✅');
   }
 
   function addInfoHotspot(yaw: number, pitch: number) {
     if (!selectedScene) return;
 
-    const hotspot: OrbitryHotspot = {
+    const hotspot: OrbitryInfoHotspot = {
       id: uid('hs'),
       type: 'info',
       yaw,
       pitch,
-      title: `Info ${selectedScene.hotspots.length + 1}`,
+      title: `Info ${selectedScene.hotspots.filter((h) => h.type === 'info').length + 1}`,
       text: ''
     };
 
@@ -117,6 +188,34 @@ export default function App() {
       const scenes = prev.scenes.map((s) => (s.id === selectedScene.id ? { ...s, hotspots: [...s.hotspots, hotspot] } : s));
       return touchProject({ ...prev, scenes });
     });
+    setSelectedHotspotId(hotspot.id);
+  }
+
+  function addLinkHotspot(yaw: number, pitch: number) {
+    if (!selectedScene) return;
+    const target = linkTargetSceneId;
+    if (!target) {
+      showToast('Select target scene for link hotspot');
+      return;
+    }
+    if (target === selectedScene.id) {
+      showToast('Link target must be a different scene');
+      return;
+    }
+
+    const hotspot: OrbitryLinkHotspot = {
+      id: uid('hs'),
+      type: 'link',
+      yaw,
+      pitch,
+      targetSceneId: target
+    };
+
+    setProject((prev) => {
+      const scenes = prev.scenes.map((s) => (s.id === selectedScene.id ? { ...s, hotspots: [...s.hotspots, hotspot] } : s));
+      return touchProject({ ...prev, scenes });
+    });
+    setSelectedHotspotId(hotspot.id);
   }
 
   function clearHotspots() {
@@ -125,7 +224,41 @@ export default function App() {
       const scenes = prev.scenes.map((s) => (s.id === selectedScene.id ? { ...s, hotspots: [] } : s));
       return touchProject({ ...prev, scenes });
     });
+    setSelectedHotspotId(null);
   }
+
+  function deleteHotspot(hotspotId: string) {
+    if (!selectedScene) return;
+    setProject((prev) => {
+      const scenes = prev.scenes.map((s) =>
+        s.id === selectedScene.id ? { ...s, hotspots: s.hotspots.filter((h) => h.id !== hotspotId) } : s
+      );
+      return touchProject({ ...prev, scenes });
+    });
+    if (selectedHotspotId === hotspotId) setSelectedHotspotId(null);
+  }
+
+  function updateHotspot(hotspotId: string, patch: Partial<OrbitryHotspot>) {
+    if (!selectedScene) return;
+    setProject((prev) => {
+      const scenes = prev.scenes.map((s) => {
+        if (s.id !== selectedScene.id) return s;
+        const hotspots = s.hotspots.map((h) => (h.id === hotspotId ? ({ ...h, ...patch } as OrbitryHotspot) : h));
+        return { ...s, hotspots };
+      });
+      return touchProject({ ...prev, scenes });
+    });
+  }
+
+  const selectedHotspot = useMemo(() => {
+    if (!selectedScene || !selectedHotspotId) return null;
+    return selectedScene.hotspots.find((h) => h.id === selectedHotspotId) ?? null;
+  }, [selectedScene, selectedHotspotId]);
+
+  const linkTargets = useMemo(() => {
+    if (!selectedScene) return [];
+    return project.scenes.filter((s) => s.id !== selectedScene.id);
+  }, [project.scenes, selectedScene?.id]);
 
   return (
     <div className="app">
@@ -137,9 +270,11 @@ export default function App() {
 
         <div className="spacer" />
 
-        <button className="btn primary" onClick={onImportPanoramaClick}>Import panoramas</button>
-        <button className="btn" onClick={saveProject}>Save project</button>
-        <button className="btn" onClick={onLoadProjectClick}>Load project</button>
+        <button className="btn primary" onClick={onImportPanoramaClick} disabled={importing}>
+          {importing ? 'Importing…' : 'Import panoramas'}
+        </button>
+        <button className="btn" onClick={saveProject} disabled={importing}>Save project</button>
+        <button className="btn" onClick={onLoadProjectClick} disabled={importing}>Load project</button>
 
         <input
           ref={importPanoramaInputRef}
@@ -159,6 +294,8 @@ export default function App() {
             if (f) loadProject(f);
           }}
         />
+
+        {importing ? <div className="topStatus">{importStatus}</div> : null}
       </div>
 
       <div className="layout">
@@ -185,13 +322,21 @@ export default function App() {
                   <div
                     key={s.id}
                     className={`sceneItem ${active ? 'active' : ''}`}
-                    onClick={() => setSelectedSceneId(s.id)}
+                    onClick={() => {
+                      setSelectedSceneId(s.id);
+                      setSelectedHotspotId(null);
+                      // Auto-fix link target when switching scenes.
+                      const other = project.scenes.find((x) => x.id !== s.id)?.id ?? null;
+                      setLinkTargetSceneId(other);
+                    }}
                   >
                     <div className="sceneThumb">{hasAsset ? '360' : '—'}</div>
                     <div className="sceneMeta">
                       <div className="sceneName">{s.name}</div>
                       <div className="sceneSub">
-                        {s.panorama.fileName ?? 'no file'}{s.panorama.width ? ` • ${s.panorama.width}×${s.panorama.height}` : ''}
+                        {s.panorama.fileName ?? 'no file'}
+                        {s.panorama.width ? ` • ${s.panorama.width}×${s.panorama.height}` : ''}
+                        {assets[s.id] && (assets[s.id].originalWidth !== assets[s.id].width) ? ` → ${assets[s.id].width}×${assets[s.id].height}` : ''}
                       </div>
                     </div>
                   </div>
@@ -211,19 +356,127 @@ export default function App() {
                 Clear
               </button>
             </div>
-            <div style={{ marginTop: 10, color: 'var(--muted)', fontSize: 12, lineHeight: 1.5 }}>
-              MVP: click inside the panorama to add an <strong>info hotspot</strong>.
-              Link hotspots and theme editor come next.
+
+            <div style={{ marginTop: 10 }}>
+              <div className="segmented" aria-label="Hotspot mode">
+                <button
+                  className={`segBtn ${hotspotMode === 'info' ? 'active' : ''}`}
+                  onClick={() => setHotspotMode('info')}
+                  disabled={!selectedScene}
+                >
+                  Info
+                </button>
+                <button
+                  className={`segBtn ${hotspotMode === 'link' ? 'active' : ''}`}
+                  onClick={() => setHotspotMode('link')}
+                  disabled={!selectedScene || project.scenes.length < 2}
+                >
+                  Link
+                </button>
+              </div>
+
+              {hotspotMode === 'link' ? (
+                <div style={{ marginTop: 10 }}>
+                  <div className="fieldLabel">Link target</div>
+                  <select
+                    className="select"
+                    value={linkTargetSceneId ?? ''}
+                    onChange={(e) => setLinkTargetSceneId(e.target.value || null)}
+                    disabled={!selectedScene || linkTargets.length === 0}
+                  >
+                    <option value="">— select —</option>
+                    {linkTargets.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <div className="small" style={{ marginTop: 8 }}>
+                    Place a <strong>link hotspot</strong>: pick target, then click inside the panorama.
+                    Click a link hotspot in the viewer to move.
+                  </div>
+                </div>
+              ) : (
+                <div className="small" style={{ marginTop: 10 }}>
+                  Place an <strong>info hotspot</strong>: click inside the panorama.
+                </div>
+              )}
             </div>
+
+            {selectedScene && selectedScene.hotspots.length > 0 ? (
+              <div style={{ marginTop: 12 }}>
+                <div className="fieldLabel">In this scene</div>
+                <div className="hsList">
+                  {selectedScene.hotspots.map((h) => {
+                    const active = h.id === selectedHotspotId;
+                    const badge = h.type === 'link' ? '↗' : 'i';
+                    const title = h.type === 'link'
+                      ? `Link → ${project.scenes.find((s) => s.id === (h as OrbitryLinkHotspot).targetSceneId)?.name ?? (h as OrbitryLinkHotspot).targetSceneId}`
+                      : ((h as OrbitryInfoHotspot).title || 'Info hotspot');
+
+                    return (
+                      <div key={h.id} className={`hsItem ${active ? 'active' : ''}`} onClick={() => setSelectedHotspotId(h.id)}>
+                        <div className="hsBadge">{badge}</div>
+                        <div className="hsTitle">{title}</div>
+                        <button
+                          className="iconBtn"
+                          title="Delete"
+                          onClick={(ev) => { ev.stopPropagation(); deleteHotspot(h.id); }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+
+            {selectedScene && selectedHotspot ? (
+              <div style={{ marginTop: 12 }}>
+                <div className="fieldLabel">Edit selected</div>
+                {selectedHotspot.type === 'info' ? (
+                  <>
+                    <input
+                      className="input"
+                      placeholder="Title"
+                      value={(selectedHotspot as OrbitryInfoHotspot).title ?? ''}
+                      onChange={(e) => updateHotspot(selectedHotspot.id, { title: e.target.value })}
+                    />
+                    <textarea
+                      className="textarea"
+                      placeholder="Text (optional)"
+                      value={(selectedHotspot as OrbitryInfoHotspot).text ?? ''}
+                      onChange={(e) => updateHotspot(selectedHotspot.id, { text: e.target.value })}
+                    />
+                  </>
+                ) : (
+                  <>
+                    <select
+                      className="select"
+                      value={(selectedHotspot as OrbitryLinkHotspot).targetSceneId}
+                      onChange={(e) => updateHotspot(selectedHotspot.id, { targetSceneId: e.target.value })}
+                    >
+                      {linkTargets.map((s) => (
+                        <option key={s.id} value={s.id}>{s.name}</option>
+                      ))}
+                    </select>
+                    <div className="small" style={{ marginTop: 8 }}>
+                      This hotspot moves to the selected scene.
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : null}
           </div>
 
           <h2>Next</h2>
           <div className="card" style={{ color: 'var(--muted)', fontSize: 12, lineHeight: 1.6 }}>
             <div>✅ Local-first editor shell</div>
             <div>✅ Project format (v1)</div>
-            <div>✅ Import equirect panoramas</div>
-            <div>✅ Click-to-add hotspots</div>
-            <div style={{ marginTop: 8 }}>Up next: link hotspots, import Marzipano <code>APP_DATA</code>, export bundles.</div>
+            <div>✅ Import equirect panoramas (safe downscale)</div>
+            <div>✅ Info + Link hotspots</div>
+            <div style={{ marginTop: 8 }}>
+              Up next: import Marzipano <code>APP_DATA</code>, export bundles.
+            </div>
           </div>
         </aside>
 
@@ -232,8 +485,20 @@ export default function App() {
             scene={selectedScene ?? undefined}
             panoramaUrl={selectedPanoramaUrl}
             hotspots={selectedScene?.hotspots ?? []}
-            onClickInViewer={(coords) => addInfoHotspot(coords.yaw, coords.pitch)}
+            onClickInViewer={(coords) => {
+              if (!selectedScene) return;
+              if (hotspotMode === 'link') addLinkHotspot(coords.yaw, coords.pitch);
+              else addInfoHotspot(coords.yaw, coords.pitch);
+            }}
+            onLinkHotspotClick={(targetId) => {
+              if (project.scenes.some((s) => s.id === targetId)) {
+                setSelectedSceneId(targetId);
+                setSelectedHotspotId(null);
+              }
+            }}
           />
+
+          {toast ? <div className="toast">{toast}</div> : null}
         </main>
       </div>
     </div>

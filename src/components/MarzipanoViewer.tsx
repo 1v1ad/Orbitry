@@ -9,9 +9,10 @@ type Props = {
   /** Hotspots to render for the current scene. */
   hotspots?: OrbitryHotspot[];
   onClickInViewer?: (coords: { yaw: number; pitch: number }, ev: MouseEvent) => void;
+  onLinkHotspotClick?: (targetSceneId: string, ev: MouseEvent) => void;
 };
 
-export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onClickInViewer }: Props) {
+export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onClickInViewer, onLinkHotspotClick }: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<any | null>(null);
   const currentSceneRef = useRef<any | null>(null);
@@ -43,7 +44,9 @@ export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onC
 
     // Create equirect scene.
     const source = Marzipano.ImageUrlSource.fromString(panoramaUrl);
-    const geometry = new Marzipano.EquirectGeometry([{ width: 4000 }]);
+    // Single-level equirect geometry. We keep it high enough for crispness,
+    // while the import step already downscales to a safe size for WebGL.
+    const geometry = new Marzipano.EquirectGeometry([{ width: 8000 }]);
 
     const limiter = Marzipano.RectilinearView.limit.traditional(1024, (120 * Math.PI) / 180);
     const view = new Marzipano.RectilinearView(scene.initialView, limiter);
@@ -83,8 +86,21 @@ export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onC
     const container = mScene.hotspotContainer();
     hotspots.forEach((h) => {
       const el = document.createElement('div');
-      el.className = 'hotspotDot';
-      el.title = h.type === 'link' ? `Link → ${h.targetSceneId}` : h.title || 'Info hotspot';
+      const isLink = h.type === 'link';
+      el.className = `hotspotDot ${isLink ? 'hotspotLink' : 'hotspotInfo'}`;
+      el.title = isLink ? `Link → ${h.targetSceneId}` : (h.title || 'Info hotspot');
+
+      if (isLink) {
+        // Clicking a link hotspot should navigate, not add a new hotspot.
+        el.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          onLinkHotspotClick?.(h.targetSceneId, ev);
+        });
+      } else {
+        // Info hotspot: stopPropagation so it doesn't create a new one.
+        el.addEventListener('click', (ev) => ev.stopPropagation());
+      }
+
       container.createHotspot(el, { yaw: h.yaw, pitch: h.pitch });
       hotspotElsRef.current.set(h.id, el);
     });
@@ -122,7 +138,7 @@ export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onC
           <div style={{ marginTop: 6 }}>
             {isReady ? (
               <>
-                Click in the panorama to add an <strong>info hotspot</strong>. (Link hotspots next.)
+                Click in the panorama to add a hotspot (Info or Link — choose in sidebar).
               </>
             ) : (
               <>Import a 360 equirectangular image (2:1) to start.</>
