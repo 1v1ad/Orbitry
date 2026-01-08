@@ -8,11 +8,29 @@ type Props = {
   panoramaUrl?: string;
   /** Hotspots to render for the current scene. */
   hotspots?: OrbitryHotspot[];
+  /** How the viewer should interpret clicks: move vs edit. */
+  interactionMode?: 'navigate' | 'info' | 'link';
+  /** Currently selected hotspot (for highlighting / editing). */
+  selectedHotspotId?: string | null;
+  /** Select a hotspot from the viewer. */
+  onSelectHotspot?: (hotspotId: string, ev: MouseEvent | PointerEvent) => void;
+  /** Update link hotspot arrow rotation (radians). */
+  onUpdateLinkRotation?: (hotspotId: string, rotation: number, ev: PointerEvent) => void;
   onClickInViewer?: (coords: { yaw: number; pitch: number }, ev: MouseEvent | PointerEvent) => void;
   onLinkHotspotClick?: (targetSceneId: string, ev: MouseEvent | PointerEvent) => void;
 };
 
-export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onClickInViewer, onLinkHotspotClick }: Props) {
+export default function MarzipanoViewer({
+  scene,
+  panoramaUrl,
+  hotspots = [],
+  interactionMode = 'navigate',
+  selectedHotspotId,
+  onSelectHotspot,
+  onUpdateLinkRotation,
+  onClickInViewer,
+  onLinkHotspotClick
+}: Props) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<any | null>(null);
   const currentSceneRef = useRef<any | null>(null);
@@ -87,22 +105,91 @@ export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onC
     hotspots.forEach((h) => {
       const el = document.createElement('div');
       const isLink = h.type === 'link';
-      el.className = `hotspotDot ${isLink ? 'hotspotLink' : 'hotspotInfo'}`;
+      const isSelected = !!selectedHotspotId && h.id === selectedHotspotId;
+      el.className = `hotspotDot ${isLink ? 'hotspotLink' : 'hotspotInfo'} ${isSelected ? 'selected' : ''}`;
       el.title = isLink ? `Link → ${h.targetSceneId}` : (h.title || 'Info hotspot');
 
+      // Click behavior depends on mode.
+      const selectThis = (ev: any) => {
+        ev.stopPropagation();
+        onSelectHotspot?.(h.id, ev);
+      };
+
       if (isLink) {
-        // Clicking a link hotspot should navigate, not add a new hotspot.
-        el.addEventListener('click', (ev) => {
-          ev.stopPropagation();
-          onLinkHotspotClick?.(h.targetSceneId, ev);
-        });
+        // Visual arrow (rotatable).
+        const arrow = document.createElement('div');
+        arrow.className = 'hsArrow';
+        // Default arrow points to the right (0 rad).
+        arrow.innerHTML = `
+          <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+            <path fill="rgba(243,196,106,0.95)" d="M4 12a1 1 0 0 1 1-1h9.2l-2.4-2.4a1 1 0 1 1 1.4-1.4l4.6 4.6a1 1 0 0 1 0 1.4l-4.6 4.6a1 1 0 1 1-1.4-1.4l2.4-2.4H5a1 1 0 0 1-1-1z"/>
+          </svg>
+        `.trim();
+        (arrow.firstElementChild as SVGElement | null)?.setAttribute('focusable', 'false');
+        const rot = (h as any).rotation ?? 0;
+        arrow.style.transform = `rotate(${rot}rad)`;
+        el.appendChild(arrow);
+
+        if (interactionMode === 'navigate') {
+          // In Move mode: clicking navigates.
+          el.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            onLinkHotspotClick?.(h.targetSceneId, ev);
+          });
+        } else {
+          // In edit modes: clicking selects.
+          el.addEventListener('click', selectThis);
+        }
+
+        // Rotate handle only when selected and in Link mode.
+        if (isSelected && interactionMode === 'link') {
+          const handle = document.createElement('div');
+          handle.className = 'hsRotateHandle';
+          handle.textContent = '↻';
+          el.appendChild(handle);
+
+          const onPointerDown = (ev: PointerEvent) => {
+            ev.stopPropagation();
+            ev.preventDefault();
+            const pointerId = ev.pointerId;
+            (handle as any).setPointerCapture?.(pointerId);
+
+            const move = (mv: PointerEvent) => {
+              if (mv.pointerId !== pointerId) return;
+              const r = el.getBoundingClientRect();
+              const cx = r.left + r.width / 2;
+              const cy = r.top + r.height / 2;
+              const angle = Math.atan2(mv.clientY - cy, mv.clientX - cx);
+              arrow.style.transform = `rotate(${angle}rad)`;
+              onUpdateLinkRotation?.(h.id, angle, mv);
+            };
+
+            const up = (upEv: PointerEvent) => {
+              if (upEv.pointerId !== pointerId) return;
+              window.removeEventListener('pointermove', move, true);
+              window.removeEventListener('pointerup', up, true);
+              window.removeEventListener('pointercancel', up, true);
+            };
+
+            window.addEventListener('pointermove', move, true);
+            window.addEventListener('pointerup', up, true);
+            window.addEventListener('pointercancel', up, true);
+          };
+
+          handle.addEventListener('pointerdown', onPointerDown);
+        }
 
         // Prevent pointer-based click-to-add from firing when clicking a hotspot.
         el.addEventListener('pointerdown', (ev) => ev.stopPropagation());
         el.addEventListener('pointerup', (ev) => ev.stopPropagation());
       } else {
-        // Info hotspot: stopPropagation so it doesn't create a new one.
-        el.addEventListener('click', (ev) => ev.stopPropagation());
+        // Info hotspot: in edit modes, clicking selects.
+        if (interactionMode !== 'navigate') {
+          el.addEventListener('click', selectThis);
+        } else {
+          // In Move mode, clicking info hotspots does nothing (for now) but should not add a new hotspot.
+          el.addEventListener('click', (ev) => ev.stopPropagation());
+        }
 
         el.addEventListener('pointerdown', (ev) => ev.stopPropagation());
         el.addEventListener('pointerup', (ev) => ev.stopPropagation());
@@ -111,7 +198,7 @@ export default function MarzipanoViewer({ scene, panoramaUrl, hotspots = [], onC
       container.createHotspot(el, { yaw: h.yaw, pitch: h.pitch });
       hotspotElsRef.current.set(h.id, el);
     });
-  }, [hotspots, scene?.id]);
+  }, [hotspots, scene?.id, selectedHotspotId, interactionMode]);
 
   // Click-to-add (but not on drag).
   useEffect(() => {

@@ -32,6 +32,8 @@ export type OrbitryLinkHotspot = {
   yaw: number;
   pitch: number;
   targetSceneId: string;
+  /** Visual direction of the arrow in radians (screen-space). */
+  rotation?: number;
 };
 
 export type OrbitryHotspot = OrbitryInfoHotspot | OrbitryLinkHotspot;

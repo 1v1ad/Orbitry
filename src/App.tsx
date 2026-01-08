@@ -210,7 +210,8 @@ export default function App() {
       type: 'link',
       yaw,
       pitch,
-      targetSceneId: target
+      targetSceneId: target,
+      rotation: 0
     };
 
     setProject((prev) => {
@@ -472,6 +473,22 @@ export default function App() {
                         <option key={s.id} value={s.id}>{s.name}</option>
                       ))}
                     </select>
+
+                    <div style={{ marginTop: 10 }}>
+                      <div className="fieldLabel">Direction</div>
+                      <input
+                        className="input"
+                        type="range"
+                        min={-3.14159}
+                        max={3.14159}
+                        step={0.01}
+                        value={(selectedHotspot as OrbitryLinkHotspot).rotation ?? 0}
+                        onChange={(e) => updateHotspot(selectedHotspot.id, { rotation: Number(e.target.value) } as any)}
+                      />
+                      <div className="small" style={{ marginTop: 6 }}>
+                        Tip: select the link hotspot in the viewer and drag the small ↻ handle to rotate the arrow.
+                      </div>
+                    </div>
                     <div className="small" style={{ marginTop: 8 }}>
                       This hotspot moves to the selected scene.
                     </div>
@@ -498,6 +515,10 @@ export default function App() {
             scene={selectedScene ?? undefined}
             panoramaUrl={selectedPanoramaUrl}
             hotspots={selectedScene?.hotspots ?? []}
+            interactionMode={hotspotMode}
+            selectedHotspotId={selectedHotspotId}
+            onSelectHotspot={(id) => setSelectedHotspotId(id)}
+            onUpdateLinkRotation={(id, rotation) => updateHotspot(id, { rotation } as any)}
             onClickInViewer={(coords) => {
               if (!selectedScene) return;
               if (hotspotMode === 'navigate') return;
@@ -505,6 +526,8 @@ export default function App() {
               else addInfoHotspot(coords.yaw, coords.pitch);
             }}
             onLinkHotspotClick={(targetId) => {
+              // Navigation works only in Move mode; in edit modes we select instead.
+              if (hotspotMode !== 'navigate') return;
               if (project.scenes.some((s) => s.id === targetId)) {
                 setSelectedSceneId(targetId);
                 setSelectedHotspotId(null);

@@ -162,6 +162,8 @@ html, body {
 .viewerWrap {
   position: relative;
   overflow: hidden;
+  height: 100%;
+  min-height: 0;
 }
 
 .viewer {
@@ -198,21 +200,59 @@ html, body {
   width: 16px;
   height: 16px;
   border-radius: 999px;
-  background: rgba(243,196,106,0.9);
-  box-shadow: 0 0 0 2px rgba(0,0,0,0.55);
   position: relative;
+  display: grid;
+  place-items: center;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
-.hotspotInfo {
-  /* default (accent) */
+.hotspotDot.selected {
+  outline: 2px solid rgba(243,196,106,0.55);
+  outline-offset: 2px;
 }
 
-.hotspotLink {
-  background: rgba(127, 196, 255, 0.92);
+/* Info hotspot stays a small dot */
+.hotspotDot.hotspotInfo {
+  background: rgba(243,196,106,0.92);
+  box-shadow: 0 0 0 2px rgba(0,0,0,0.55);
 }
 
-.hotspotLink::after {
-  border-color: rgba(127, 196, 255, 0.35);
+/* Link hotspot is a bigger button with an arrow that can be rotated */
+.hotspotDot.hotspotLink {
+  width: 30px;
+  height: 30px;
+  background: rgba(18,26,35,0.78);
+  border: 1px solid rgba(243,196,106,0.45);
+  box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+}
+
+.hsArrow {
+  width: 18px;
+  height: 18px;
+  display: block;
+  transform-origin: 50% 50%;
+  pointer-events: none;
+}
+
+.hsRotateHandle {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.25);
+  background: rgba(18,26,35,0.9);
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  color: rgba(255,255,255,0.85);
+  cursor: grab;
+}
+
+.hsRotateHandle:active {
+  cursor: grabbing;
 }
 
 .toast {
