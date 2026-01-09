@@ -192,10 +192,15 @@ html, body { margin: 0; padding: 0; height: 100%; background: #0b0f17; color: #e
 
   const readme = `Orbitry export (viewer)
 
-1) Open index.html to view the tour.
-2) If your browser blocks local file access, run a tiny local server in this folder:
+Files:
+- index.html            Viewer for hosting (Netlify / any static hosting).
+- viewer_standalone.html Offline viewer (double-click works, everything embedded).
+
+Local preview options:
+1) Recommended: open viewer_standalone.html (no server needed).
+2) Or run a tiny local server in this folder, then open http://localhost:8000 :
    - Windows (PowerShell):  python -m http.server 8000
-   - Then open http://localhost:8000
+   - Node:                 npx serve -l 8000
 `;
 
   return { css, indexHtml, projectJs, viewerJs, marzipanoUmd, readme };
@@ -223,6 +228,118 @@ async function collectAssetsForExport(project: OrbitryProject, assets: Record<st
   }
 
   return out;
+}
+
+function buildStandaloneHtml(args: {
+  project: OrbitryProject;
+  embeddedAssets: Record<string, string>;
+  css: string;
+  marzipanoUmd: string;
+}) {
+  const { project, embeddedAssets, css, marzipanoUmd } = args;
+
+  // Single-file viewer that can be opened directly from file:// (no CORS issues)
+  // because all panoramas are embedded as data: URLs.
+  return `<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>${escapeHtml(project.title || 'Orbitry Viewer')}</title>
+    <style>${css}</style>
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="brand">Orbitry Viewer</div>
+      <select id="sceneSelect" class="select"></select>
+      <div class="spacer"></div>
+      <button class="btn" id="btnFullscreen">Fullscreen</button>
+    </div>
+    <div id="pano"></div>
+    <div id="infoPanel" class="infoPanel">
+      <div class="infoClose" id="infoClose">✕</div>
+      <div class="infoTitle" id="infoTitle"></div>
+      <div class="infoText" id="infoText"></div>
+    </div>
+
+    <script>${marzipanoUmd}</script>
+    <script>window.ORBITRY_PROJECT = ${JSON.stringify(project)}; window.ORBITRY_ASSETS = ${JSON.stringify(embeddedAssets)};</script>
+    <script>
+      // Viewer logic (uses embedded assets)
+      (function(){
+        var project = window.ORBITRY_PROJECT;
+        var assets = window.ORBITRY_ASSETS || {};
+        if (!project || !project.scenes || !project.scenes.length) {
+          document.body.innerHTML = '<div style="padding:24px;color:#fff">No scenes in project</div>';
+          return;
+        }
+        var container = document.getElementById('pano');
+        var viewer = new window.Marzipano.Viewer(container, { stageType: 'webgl' });
+        var sceneMap = {}; project.scenes.forEach(function(s){ sceneMap[s.id] = s; });
+
+        var sceneSelect = document.getElementById('sceneSelect');
+        project.scenes.forEach(function(s){
+          var opt = document.createElement('option');
+          opt.value = s.id;
+          opt.textContent = s.name || s.id;
+          sceneSelect.appendChild(opt);
+        });
+
+        var infoPanel = document.getElementById('infoPanel');
+        var infoTitle = document.getElementById('infoTitle');
+        var infoText  = document.getElementById('infoText');
+        document.getElementById('infoClose').addEventListener('click', function(){ infoPanel.classList.remove('show'); });
+
+        function showInfo(h){ infoTitle.textContent = h.title || 'Info'; infoText.textContent = h.text || ''; infoPanel.classList.add('show'); }
+        function makeHotspotEl(h){
+          var el = document.createElement('div');
+          var isLink = h.type === 'link';
+          el.className = 'hotspotDot ' + (isLink ? 'hotspotLink' : 'hotspotInfo');
+          if (isLink) {
+            var arrow = document.createElement('div'); arrow.className = 'hsArrow';
+            arrow.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="rgba(243,196,106,0.95)" d="M4 12a1 1 0 0 1 1-1h9.2l-2.4-2.4a1 1 0 1 1 1.4-1.4l4.6 4.6a1 1 0 0 1 0 1.4l-4.6 4.6a1 1 0 1 1-1.4-1.4l2.4-2.4H5a1 1 0 0 1-1-1z"/></svg>';
+            var rot = (typeof h.rotation === 'number') ? h.rotation : 0; arrow.style.transform = 'rotate(' + rot + 'rad)';
+            el.appendChild(arrow);
+            el.addEventListener('click', function(ev){ ev.stopPropagation(); if (h.targetSceneId) loadScene(h.targetSceneId); });
+          } else {
+            el.addEventListener('click', function(ev){ ev.stopPropagation(); showInfo(h); });
+          }
+          return el;
+        }
+
+        var current = { hotspots: [] };
+        function clearHotspots(){ current.hotspots.forEach(function(el){ try { el.remove(); } catch(e){} }); current.hotspots = []; }
+
+        function loadScene(sceneId){
+          var s = sceneMap[sceneId]; if (!s) return;
+          infoPanel.classList.remove('show'); clearHotspots();
+          var imgUrl = assets[s.id];
+          var source = window.Marzipano.ImageUrlSource.fromString(imgUrl);
+          var geometry = new window.Marzipano.EquirectGeometry([{ width: 8000 }]);
+          var limiter = window.Marzipano.RectilinearView.limit.traditional(1024, (120 * Math.PI) / 180);
+          var view = new window.Marzipano.RectilinearView(s.initialView || { yaw: 0, pitch: 0, fov: 1.2 }, limiter);
+          var mscene = viewer.createScene({ source: source, geometry: geometry, view: view });
+          mscene.switchTo({ transitionDuration: 260 });
+          sceneSelect.value = s.id;
+          var hsContainer = mscene.hotspotContainer();
+          (s.hotspots || []).forEach(function(h){
+            var el = makeHotspotEl(h);
+            hsContainer.createHotspot(el, { yaw: h.yaw, pitch: h.pitch });
+            current.hotspots.push(el);
+          });
+        }
+
+        sceneSelect.addEventListener('change', function(){ loadScene(sceneSelect.value); });
+        document.getElementById('btnFullscreen').addEventListener('click', function(){
+          var el = document.documentElement;
+          if (!document.fullscreenElement) (el.requestFullscreen||el.webkitRequestFullscreen||el.msRequestFullscreen).call(el);
+          else (document.exitFullscreen||document.webkitExitFullscreen||document.msExitFullscreen).call(document);
+        });
+        loadScene(project.scenes[0].id);
+      })();
+    </script>
+  </body>
+</html>`;
 }
 
 /**
@@ -256,6 +373,20 @@ export async function exportViewer(project: OrbitryProject, assets: Record<strin
       await writeFile(assetsDir, a.fileName, a.blob);
     }
 
+    // Also write a single-file offline viewer for easy double-click viewing.
+    // (Folder mode is great for hosting, but file:// often blocks image fetches.)
+    const embeddedAssets: Record<string, string> = {};
+    for (const a of exportAssets) {
+      embeddedAssets[a.sceneId] = await blobToDataUrl(a.blob);
+    }
+    const standalone = buildStandaloneHtml({
+      project,
+      embeddedAssets,
+      css: files.css,
+      marzipanoUmd: files.marzipanoUmd,
+    });
+    await writeFile(outDir, 'viewer_standalone.html', standalone);
+
     return { ok: true as const, mode: 'folder' as const, folderName };
   }
 
@@ -265,85 +396,12 @@ export async function exportViewer(project: OrbitryProject, assets: Record<strin
     embeddedAssets[a.sceneId] = await blobToDataUrl(a.blob);
   }
 
-  const single = `<!doctype html>
-<html lang="ru">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>${escapeHtml(project.title || 'Orbitry Viewer')}</title>
-    <style>${files.css}</style>
-  </head>
-  <body>
-    <div class="topbar">
-      <div class="brand">Orbitry Viewer</div>
-      <select id="sceneSelect" class="select"></select>
-      <div class="spacer"></div>
-      <button class="btn" id="btnFullscreen">Fullscreen</button>
-    </div>
-    <div id="pano"></div>
-    <div id="infoPanel" class="infoPanel">
-      <div class="infoClose" id="infoClose">✕</div>
-      <div class="infoTitle" id="infoTitle"></div>
-      <div class="infoText" id="infoText"></div>
-    </div>
-
-    <script>${files.marzipanoUmd}</script>
-    <script>window.ORBITRY_PROJECT = ${JSON.stringify(project)}; window.ORBITRY_ASSETS = ${JSON.stringify(embeddedAssets)};</script>
-    <script>
-      // Patch viewer.js to use embedded assets
-      (function(){
-        var project = window.ORBITRY_PROJECT;
-        var assets = window.ORBITRY_ASSETS || {};
-        if (!project || !project.scenes || !project.scenes.length) return;
-        var container = document.getElementById('pano');
-        var viewer = new window.Marzipano.Viewer(container, { stageType: 'webgl' });
-        var sceneMap = {}; project.scenes.forEach(function(s){ sceneMap[s.id] = s; });
-        var sceneSelect = document.getElementById('sceneSelect');
-        project.scenes.forEach(function(s){ var opt = document.createElement('option'); opt.value = s.id; opt.textContent = s.name || s.id; sceneSelect.appendChild(opt); });
-        var infoPanel = document.getElementById('infoPanel');
-        var infoTitle = document.getElementById('infoTitle');
-        var infoText  = document.getElementById('infoText');
-        document.getElementById('infoClose').addEventListener('click', function(){ infoPanel.classList.remove('show'); });
-        function showInfo(h){ infoTitle.textContent = h.title || 'Info'; infoText.textContent = h.text || ''; infoPanel.classList.add('show'); }
-        function makeHotspotEl(h){
-          var el = document.createElement('div');
-          var isLink = h.type === 'link';
-          el.className = 'hotspotDot ' + (isLink ? 'hotspotLink' : 'hotspotInfo');
-          if (isLink) {
-            var arrow = document.createElement('div'); arrow.className = 'hsArrow';
-            arrow.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18"><path fill="rgba(243,196,106,0.95)" d="M4 12a1 1 0 0 1 1-1h9.2l-2.4-2.4a1 1 0 1 1 1.4-1.4l4.6 4.6a1 1 0 0 1 0 1.4l-4.6 4.6a1 1 0 1 1-1.4-1.4l2.4-2.4H5a1 1 0 0 1-1-1z"/></svg>';
-            var rot = (typeof h.rotation === 'number') ? h.rotation : 0; arrow.style.transform = 'rotate(' + rot + 'rad)';
-            el.appendChild(arrow);
-            el.addEventListener('click', function(ev){ ev.stopPropagation(); if (h.targetSceneId) loadScene(h.targetSceneId); });
-          } else {
-            el.addEventListener('click', function(ev){ ev.stopPropagation(); showInfo(h); });
-          }
-          return el;
-        }
-        var current = { mscene: null, hotspots: [] };
-        function clearHotspots(){ current.hotspots.forEach(function(el){ try { el.remove(); } catch(e){} }); current.hotspots = []; }
-        function loadScene(sceneId){
-          var s = sceneMap[sceneId]; if (!s) return;
-          infoPanel.classList.remove('show'); clearHotspots();
-          var imgUrl = assets[s.id];
-          var source = window.Marzipano.ImageUrlSource.fromString(imgUrl);
-          var geometry = new window.Marzipano.EquirectGeometry([{ width: 8000 }]);
-          var limiter = window.Marzipano.RectilinearView.limit.traditional(1024, (120 * Math.PI) / 180);
-          var view = new window.Marzipano.RectilinearView(s.initialView || { yaw: 0, pitch: 0, fov: 1.2 }, limiter);
-          var mscene = viewer.createScene({ source: source, geometry: geometry, view: view });
-          current.mscene = mscene;
-          mscene.switchTo({ transitionDuration: 260 });
-          sceneSelect.value = s.id;
-          var hsContainer = mscene.hotspotContainer();
-          (s.hotspots || []).forEach(function(h){ var el = makeHotspotEl(h); hsContainer.createHotspot(el, { yaw: h.yaw, pitch: h.pitch }); current.hotspots.push(el); });
-        }
-        sceneSelect.addEventListener('change', function(){ loadScene(sceneSelect.value); });
-        document.getElementById('btnFullscreen').addEventListener('click', function(){ var el = document.documentElement; if (!document.fullscreenElement) (el.requestFullscreen||el.webkitRequestFullscreen||el.msRequestFullscreen).call(el); else (document.exitFullscreen||document.webkitExitFullscreen||document.msExitFullscreen).call(document); });
-        loadScene(project.scenes[0].id);
-      })();
-    </script>
-  </body>
-</html>`;
+  const single = buildStandaloneHtml({
+    project,
+    embeddedAssets,
+    css: files.css,
+    marzipanoUmd: files.marzipanoUmd,
+  });
 
   const blob = new Blob([single], { type: 'text/html' });
   const url = URL.createObjectURL(blob);
