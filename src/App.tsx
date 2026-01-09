@@ -61,7 +61,9 @@ export default function App() {
           width: a.width,
           height: a.height,
           originalWidth: a.originalWidth,
-          originalHeight: a.originalHeight
+          originalHeight: a.originalHeight,
+          // Keep required metadata for StoredAsset.
+          updatedAt: a.updatedAt || new Date().toISOString()
         };
       }
 
