@@ -12,6 +12,7 @@ import {
   type OrbitryLinkHotspot
 } from './lib/project';
 import { downloadText } from './lib/download';
+import { exportViewer } from './lib/exportViewer';
 import {
   getSafeMaxTextureSize,
   loadAssetFromIdb,
@@ -47,6 +48,34 @@ export default function App() {
 
   const onImportPanoramaClick = () => importPanoramaInputRef.current?.click();
   const onLoadProjectClick = () => loadProjectInputRef.current?.click();
+
+  async function onExportViewerClick() {
+    try {
+      // Strip runtime-only URL field.
+      const assetsForExport: Record<string, StoredAsset | undefined> = {};
+      for (const [sceneId, a] of Object.entries(assets)) {
+        assetsForExport[sceneId] = {
+          sceneId: a.sceneId,
+          fileName: a.fileName,
+          blob: a.blob,
+          width: a.width,
+          height: a.height,
+          originalWidth: a.originalWidth,
+          originalHeight: a.originalHeight
+        };
+      }
+
+      const res = await exportViewer(project, assetsForExport);
+      if (res.mode === 'folder') {
+        showToast(`Exported viewer to folder: ${res.folderName}`);
+      } else {
+        showToast('Downloaded viewer HTML');
+      }
+    } catch (e: any) {
+      console.error(e);
+      showToast(`Export failed: ${e?.message || String(e)}`);
+    }
+  }
 
   function showToast(msg: string) {
     setToast(msg);
@@ -278,6 +307,9 @@ export default function App() {
         </button>
         <button className="btn" onClick={saveProject} disabled={importing}>Save project</button>
         <button className="btn" onClick={onLoadProjectClick} disabled={importing}>Load project</button>
+        <button className="btn" onClick={onExportViewerClick} disabled={importing || project.scenes.length === 0}>
+          Export viewer
+        </button>
 
         <input
           ref={importPanoramaInputRef}
