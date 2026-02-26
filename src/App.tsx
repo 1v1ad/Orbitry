@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import MarzipanoViewer from './components/MarzipanoViewer';
 import {
   assertIsProject,
@@ -24,6 +24,19 @@ import {
 type AssetMap = Record<string, (StoredAsset & { url: string })>;
 type HotspotMode = 'navigate' | 'info' | 'link';
 
+// Железобетонное скрытие элементов, чтобы не было "призраков"
+const hiddenInputStyle: React.CSSProperties = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  padding: 0,
+  margin: '-1px',
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  borderWidth: 0,
+};
+
 export default function App() {
   const [project, setProject] = useState<OrbitryProject>(() => createEmptyProject('Orbitry MVP'));
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
@@ -38,6 +51,7 @@ export default function App() {
   const [selectedHotspotId, setSelectedHotspotId] = useState<string | null>(null);
 
   const loadProjectInputRef = useRef<HTMLInputElement | null>(null);
+  const panoramaInputRef = useRef<HTMLInputElement | null>(null);
 
   const scenes = project.scenes;
   const selectedScene = useMemo(() => scenes.find((s) => s.id === selectedSceneId) || null, [scenes, selectedSceneId]);
@@ -48,7 +62,7 @@ export default function App() {
   function showToast(msg: string) {
     setToast(msg);
     window.clearTimeout((showToast as any)._t);
-    (showToast as any)._t = window.setTimeout(() => setToast(null), 2800);
+    (showToast as any)._t = window.setTimeout(() => setToast(null), 3500);
   }
 
   // ── Asset helpers ──────────────────────────────
@@ -74,56 +88,63 @@ export default function App() {
     setImporting(true);
     setImportStatus('Preparing…');
 
-    const safeMax = await getSafeMaxTextureSize();
-    const newScenes: OrbitryScene[] = [];
+    try {
+      const safeMax = await getSafeMaxTextureSize();
+      const newScenes: OrbitryScene[] = [];
 
-    let idx = 0;
-    for (const file of Array.from(files)) {
-      idx += 1;
-      setImportStatus(`Processing ${idx}/${files.length}: ${file.name}`);
+      let idx = 0;
+      for (const file of Array.from(files)) {
+        idx += 1;
+        setImportStatus(`Processing ${idx}/${files.length}: ${file.name}`);
 
-      const { blob, width, height, originalWidth, originalHeight, fileName } = await processEquirectToSafeBlob(file, {
-        forceMaxSize: safeMax,
-        mime: 'image/jpeg',
-        quality: 0.9
-      });
+        const { blob, width, height, originalWidth, originalHeight, fileName } = await processEquirectToSafeBlob(file, {
+          forceMaxSize: safeMax,
+          mime: 'image/jpeg',
+          quality: 0.9
+        });
 
-      const id = uid('scene');
-      const baseName = file.name.replace(/\.[^/.]+$/, '');
+        const id = uid('scene');
+        const baseName = file.name.replace(/\.[^/.]+$/, '');
 
-      const scene: OrbitryScene = {
-        id,
-        name: baseName || `Scene ${project.scenes.length + newScenes.length + 1}`,
-        panorama: {
-          type: 'equirect',
-          label: originalWidth !== width ? `Imported (scaled to ${width}×${height})` : 'Imported equirect',
-          fileName,
-          width: originalWidth,
-          height: originalHeight
-        },
-        initialView: { yaw: 0, pitch: 0, fov: 1.25 },
-        hotspots: []
-      };
+        const scene: OrbitryScene = {
+          id,
+          name: baseName || `Scene ${project.scenes.length + newScenes.length + 1}`,
+          panorama: {
+            type: 'equirect',
+            label: originalWidth !== width ? `Imported (scaled to ${width}×${height})` : 'Imported equirect',
+            fileName,
+            width: originalWidth,
+            height: originalHeight
+          },
+          initialView: { yaw: 0, pitch: 0, fov: 1.25 },
+          hotspots: []
+        };
 
-      const stored: StoredAsset = { sceneId: id, fileName, blob, width, height, originalWidth, originalHeight, updatedAt: new Date().toISOString() };
-      await saveAssetToIdb(stored);
-      upsertAsset(id, stored);
-      newScenes.push(scene);
+        const stored: StoredAsset = { sceneId: id, fileName, blob, width, height, originalWidth, originalHeight, updatedAt: new Date().toISOString() };
+        await saveAssetToIdb(stored);
+        upsertAsset(id, stored);
+        newScenes.push(scene);
+      }
+
+      setProject((prev) => touchProject({ ...prev, scenes: [...prev.scenes, ...newScenes] }));
+      if (!selectedSceneId && newScenes.length > 0) setSelectedSceneId(newScenes[0].id);
+
+      if (newScenes.length > 0) {
+        const firstSceneId = (selectedSceneId ?? newScenes[0].id);
+        const all = [...project.scenes, ...newScenes].map((s) => s.id);
+        const other = all.find((id) => id !== firstSceneId) ?? null;
+        if (!linkTargetSceneId) setLinkTargetSceneId(other);
+      }
+
+      setImporting(false);
+      setImportStatus('');
+      showToast(`${newScenes.length} panorama${newScenes.length > 1 ? 's' : ''} imported`);
+    } catch (err: any) {
+      console.error('Import error:', err);
+      setImporting(false);
+      setImportStatus('');
+      showToast(`Import error: ${err.message || String(err)}`);
     }
-
-    setProject((prev) => touchProject({ ...prev, scenes: [...prev.scenes, ...newScenes] }));
-    if (!selectedSceneId && newScenes.length > 0) setSelectedSceneId(newScenes[0].id);
-
-    if (newScenes.length > 0) {
-      const firstSceneId = (selectedSceneId ?? newScenes[0].id);
-      const all = [...project.scenes, ...newScenes].map((s) => s.id);
-      const other = all.find((id) => id !== firstSceneId) ?? null;
-      if (!linkTargetSceneId) setLinkTargetSceneId(other);
-    }
-
-    setImporting(false);
-    setImportStatus('');
-    showToast(`${newScenes.length} panorama${newScenes.length > 1 ? 's' : ''} imported`);
   }
 
   // ── Project save / load ────────────────────────
@@ -135,23 +156,28 @@ export default function App() {
   }
 
   async function loadProject(file: File) {
-    const text = await file.text();
-    const data = JSON.parse(text);
-    assertIsProject(data);
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      assertIsProject(data);
 
-    setProject(data);
-    setSelectedSceneId(data.scenes[0]?.id ?? null);
-    setSelectedHotspotId(null);
+      setProject(data);
+      setSelectedSceneId(data.scenes[0]?.id ?? null);
+      setSelectedHotspotId(null);
 
-    for (const s of data.scenes) {
-      const asset = await loadAssetFromIdb(s.id);
-      if (asset) upsertAsset(s.id, asset);
+      for (const s of data.scenes) {
+        const asset = await loadAssetFromIdb(s.id);
+        if (asset) upsertAsset(s.id, asset);
+      }
+
+      const firstId = data.scenes[0]?.id ?? null;
+      const other = data.scenes.find((s) => s.id !== firstId)?.id ?? null;
+      setLinkTargetSceneId(other);
+      showToast('Project loaded');
+    } catch (err: any) {
+      console.error('Load project error:', err);
+      showToast(`Failed to load project: ${err.message || String(err)}`);
     }
-
-    const firstId = data.scenes[0]?.id ?? null;
-    const other = data.scenes.find((s) => s.id !== firstId)?.id ?? null;
-    setLinkTargetSceneId(other);
-    showToast('Project loaded');
   }
 
   async function onPublishClick() {
@@ -255,14 +281,12 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* Hidden load-project input (kept outside for simplicity) */}
+      {/* Hidden load-project input */}
       <input
         ref={loadProjectInputRef}
-        id="load-project-upload"
-        className="hidden-input"
         type="file"
         accept="application/json,.json"
-        style={{ display: 'none' }}
+        style={hiddenInputStyle}
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) loadProject(f);
@@ -271,7 +295,7 @@ export default function App() {
       />
 
       {/* ── Sidebar ────────────────────────────── */}
-      <aside className="sidebar" style={{ overflowX: 'hidden' }}>
+      <aside className="sidebar">
         <div className="sidebar-header">
           <div className="brand">
             <div className="brand-logo">O</div>
@@ -296,19 +320,26 @@ export default function App() {
                 {importStatus}
               </div>
             ) : (
-              <label htmlFor="panorama-upload" className="drop-zone">
+              <div 
+                className="drop-zone" 
+                onClick={() => panoramaInputRef.current?.click()}
+                style={{ cursor: 'pointer' }}
+              >
                 <input
-                  id="panorama-upload"
+                  ref={panoramaInputRef}
                   type="file"
                   accept="image/jpeg,image/jpg,image/png,image/tiff,image/tif"
                   multiple
-                  style={{ display: 'none' }}
-                  onChange={(e) => { handleImportFiles(e.target.files); e.target.value = ''; }}
+                  style={hiddenInputStyle}
+                  onChange={(e) => { 
+                    handleImportFiles(e.target.files); 
+                    e.target.value = ''; 
+                  }}
                 />
                 <div className="drop-zone-icon">📷</div>
                 <div className="drop-zone-text">Click to add panoramas</div>
                 <div className="drop-zone-hint">Equirectangular images (2:1 ratio)</div>
-              </label>
+              </div>
             )}
           </div>
 
