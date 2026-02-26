@@ -66,7 +66,7 @@ export default function App() {
       }
 
       await exportViewer(project, assetsForExport);
-      showToast('Downloaded viewer HTML ✅');
+      showToast('Downloaded export .zip ✅');
     } catch (e: any) {
       console.error(e);
       showToast(`Export failed: ${e?.message || String(e)}`);
