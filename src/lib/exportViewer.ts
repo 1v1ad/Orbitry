@@ -13,13 +13,6 @@ function safeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, '_').replace(/^_+|_+$/g, '') || 'file';
 }
 
-async function writeFile(dir: any, name: string, data: Blob | string) {
-  const fileHandle = await dir.getFileHandle(name, { create: true });
-  const writable = await fileHandle.createWritable();
-  await writable.write(data);
-  await writable.close();
-}
-
 async function blobToDataUrl(blob: Blob): Promise<string> {
   return await new Promise((resolve, reject) => {
     const r = new FileReader();
