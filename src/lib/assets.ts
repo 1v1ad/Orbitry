@@ -110,6 +110,9 @@ async function decodeImageToBitmap(file: File): Promise<{ bitmap: ImageBitmap; r
 /**
  * "Does something" like Marzipano Tool: decodes and (if needed) downsizes
  * the equirect image to a safe size for WebGL.
+ *
+ * Also supports partial panoramas (e.g. Samsung phone panoramas at ~4:1 ratio):
+ * pads to 2:1 equirectangular with black fill for missing sky/floor.
  */
 export async function processEquirectToSafeBlob(
   file: File,
@@ -120,23 +123,58 @@ export async function processEquirectToSafeBlob(
   const originalHeight = bitmap.height;
 
   const safeMax = opts?.forceMaxSize ?? (await getSafeMaxTextureSize());
+  const ratio = originalWidth / originalHeight;
 
-  // Keep as-is if it's already within safe limits.
-  const scale = Math.min(1, safeMax / Math.max(originalWidth, originalHeight));
-  const width = Math.round(originalWidth * scale);
-  const height = Math.round(originalHeight * scale);
+  // Determine if we need to pad to 2:1 equirectangular.
+  // Standard equirect is 2:1. Anything wider (phone panoramas: ~3:1 to ~5:1)
+  // gets padded vertically with black to form a proper 2:1 image.
+  const needsPadding = ratio > 2.2; // Allow small tolerance around 2:1
+
+  let srcWidth = originalWidth;
+  let srcHeight = originalHeight;
+  let targetWidth: number;
+  let targetHeight: number;
+
+  if (needsPadding) {
+    // Keep the width, compute height for 2:1
+    targetWidth = srcWidth;
+    targetHeight = Math.round(srcWidth / 2);
+  } else {
+    targetWidth = srcWidth;
+    targetHeight = srcHeight;
+  }
+
+  // Now apply safe max downscale
+  const scale = Math.min(1, safeMax / Math.max(targetWidth, targetHeight));
+  const finalWidth = Math.round(targetWidth * scale);
+  const finalHeight = Math.round(targetHeight * scale);
 
   let blob: Blob;
-  if (scale === 1) {
-    // Keep original file bytes.
+
+  if (!needsPadding && scale === 1) {
+    // Perfect 2:1 and within size limits — keep original bytes
     blob = file;
   } else {
     const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
+    canvas.width = finalWidth;
+    canvas.height = finalHeight;
     const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('Canvas 2D context not available');
-    ctx.drawImage(bitmap, 0, 0, width, height);
+
+    // Fill with black (sky/floor for partial panoramas)
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(0, 0, finalWidth, finalHeight);
+
+    if (needsPadding) {
+      // Center the panorama vertically in the 2:1 frame
+      const drawW = finalWidth;
+      const drawH = Math.round((originalHeight / originalWidth) * finalWidth);
+      const offsetY = Math.round((finalHeight - drawH) / 2);
+      ctx.drawImage(bitmap, 0, offsetY, drawW, drawH);
+    } else {
+      // Standard downscale
+      ctx.drawImage(bitmap, 0, 0, finalWidth, finalHeight);
+    }
 
     const mime = opts?.mime ?? 'image/jpeg';
     const quality = typeof opts?.quality === 'number' ? opts.quality : 0.9;
@@ -158,5 +196,5 @@ export async function processEquirectToSafeBlob(
   revoke?.();
 
   const fileName = file.name;
-  return { blob, width, height, originalWidth, originalHeight, fileName };
+  return { blob, width: finalWidth, height: finalHeight, originalWidth, originalHeight, fileName };
 }

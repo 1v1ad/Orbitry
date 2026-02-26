@@ -351,46 +351,10 @@ function buildStandaloneHtml(args: {
  * Fallback path (no FS API): downloads a single HTML with embedded images.
  */
 export async function exportViewer(project: OrbitryProject, assets: Record<string, StoredAsset | undefined>) {
-  const showDirectoryPicker = (window as any).showDirectoryPicker as undefined | ((opts?: any) => Promise<any>);
   const files = buildViewerFiles(project);
   const exportAssets = await collectAssetsForExport(project, assets);
 
-  // FS Access API path.
-  if (showDirectoryPicker) {
-    const root = await showDirectoryPicker({ mode: 'readwrite' });
-    const folderName = safeFileName(`orbitry_export_${new Date().toISOString().replace(/[:.]/g, '-')}`);
-    const outDir = await root.getDirectoryHandle(folderName, { create: true });
-
-    await writeFile(outDir, 'index.html', files.indexHtml);
-    await writeFile(outDir, 'style.css', files.css);
-    await writeFile(outDir, 'marzipano.js', files.marzipanoUmd);
-    await writeFile(outDir, 'project.js', files.projectJs);
-    await writeFile(outDir, 'viewer.js', files.viewerJs);
-    await writeFile(outDir, 'README.txt', files.readme);
-
-    const assetsDir = await outDir.getDirectoryHandle('assets', { create: true });
-    for (const a of exportAssets) {
-      await writeFile(assetsDir, a.fileName, a.blob);
-    }
-
-    // Also write a single-file offline viewer for easy double-click viewing.
-    // (Folder mode is great for hosting, but file:// often blocks image fetches.)
-    const embeddedAssets: Record<string, string> = {};
-    for (const a of exportAssets) {
-      embeddedAssets[a.sceneId] = await blobToDataUrl(a.blob);
-    }
-    const standalone = buildStandaloneHtml({
-      project,
-      embeddedAssets,
-      css: files.css,
-      marzipanoUmd: files.marzipanoUmd,
-    });
-    await writeFile(outDir, 'viewer_standalone.html', standalone);
-
-    return { ok: true as const, mode: 'folder' as const, folderName };
-  }
-
-  // Fallback: export a single HTML with embedded assets.
+  // Always download as a single standalone HTML — no scary browser permissions.
   const embeddedAssets: Record<string, string> = {};
   for (const a of exportAssets) {
     embeddedAssets[a.sceneId] = await blobToDataUrl(a.blob);

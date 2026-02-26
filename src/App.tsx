@@ -66,11 +66,7 @@ export default function App() {
       }
 
       const res = await exportViewer(project, assetsForExport);
-      if (res.mode === 'folder') {
-        showToast(`Exported viewer to folder: ${res.folderName}`);
-      } else {
-        showToast('Downloaded viewer HTML');
-      }
+      showToast('Downloaded viewer HTML ✅');
     } catch (e: any) {
       console.error(e);
       showToast(`Export failed: ${e?.message || String(e)}`);
@@ -129,7 +125,11 @@ export default function App() {
         name: baseName || `Scene ${project.scenes.length + newScenes.length + 1}`,
         panorama: {
           type: 'equirect',
-          label: originalWidth !== width ? `Imported (scaled to ${width}×${height})` : 'Imported equirect',
+          label: originalWidth !== width
+            ? (originalWidth / originalHeight > 2.2
+              ? `Phone panorama (padded to ${width}×${height})`
+              : `Imported (scaled to ${width}×${height})`)
+            : 'Imported equirect',
           fileName: fileName,
           width: originalWidth,
           height: originalHeight
@@ -342,7 +342,7 @@ export default function App() {
           <div className="section">
             <div className="sectionHeader">
               <div className={`step ${hasScenes ? 'done' : ''}`}>1</div>
-              <div className="sectionTitle">Import Panoramas</div>
+              <div className="sectionTitle active">Import Panoramas</div>
               {hasScenes && <div className="count">{scenes.length}</div>}
             </div>
             {importing ? (
@@ -363,7 +363,7 @@ export default function App() {
           <div className="section">
             <div className="sectionHeader">
               <div className={`step ${hasScenes ? 'done' : ''}`}>2</div>
-              <div className="sectionTitle">Scenes</div>
+              <div className={`sectionTitle ${hasScenes ? 'active' : ''}`}>Scenes</div>
             </div>
             <div className="card">
               {project.scenes.length === 0 ? (
@@ -403,7 +403,7 @@ export default function App() {
           <div className="section">
             <div className="sectionHeader">
               <div className={`step ${hasHotspots ? 'done' : ''}`}>3</div>
-              <div className="sectionTitle">Hotspots</div>
+              <div className={`sectionTitle ${selectedScene ? 'active' : ''}`}>Hotspots</div>
               {selectedScene && selectedScene.hotspots.length > 0 && (
                 <div className="count">{selectedScene.hotspots.length}</div>
               )}
@@ -559,7 +559,7 @@ export default function App() {
           <div className="section">
             <div className="sectionHeader">
               <div className="step">4</div>
-              <div className="sectionTitle">Save & Publish</div>
+              <div className="sectionTitle active">Save & Publish</div>
             </div>
             <div className="actionGroup">
               <button className="actionCard" onClick={saveProject} disabled={importing}>
