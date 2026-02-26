@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import MarzipanoViewer from './components/MarzipanoViewer';
 import {
   assertIsProject,
@@ -23,19 +23,6 @@ import {
 
 type AssetMap = Record<string, (StoredAsset & { url: string })>;
 type HotspotMode = 'navigate' | 'info' | 'link';
-
-// Железобетонное скрытие элементов, чтобы не было "призраков"
-const hiddenInputStyle: React.CSSProperties = {
-  position: 'absolute',
-  width: '1px',
-  height: '1px',
-  padding: 0,
-  margin: '-1px',
-  overflow: 'hidden',
-  clip: 'rect(0, 0, 0, 0)',
-  whiteSpace: 'nowrap',
-  borderWidth: 0,
-};
 
 export default function App() {
   const [project, setProject] = useState<OrbitryProject>(() => createEmptyProject('Orbitry MVP'));
@@ -83,25 +70,35 @@ export default function App() {
   // ── Import ─────────────────────────────────────
 
   async function handleImportFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
+    console.log('📦 handleImportFiles called. Files received:', files);
+    if (!files || files.length === 0) {
+      console.log('⚠️ No files selected, aborting import.');
+      return;
+    }
 
     setImporting(true);
     setImportStatus('Preparing…');
 
     try {
+      console.log('⚙️ Requesting getSafeMaxTextureSize()...');
       const safeMax = await getSafeMaxTextureSize();
+      console.log('✅ getSafeMaxTextureSize returned:', safeMax);
+
       const newScenes: OrbitryScene[] = [];
 
       let idx = 0;
       for (const file of Array.from(files)) {
         idx += 1;
         setImportStatus(`Processing ${idx}/${files.length}: ${file.name}`);
+        console.log(`⏳ Processing file ${idx}:`, file.name, file.size, file.type);
 
         const { blob, width, height, originalWidth, originalHeight, fileName } = await processEquirectToSafeBlob(file, {
           forceMaxSize: safeMax,
           mime: 'image/jpeg',
           quality: 0.9
         });
+        
+        console.log(`✅ File ${file.name} processed! Result:`, { width, height, fileName });
 
         const id = uid('scene');
         const baseName = file.name.replace(/\.[^/.]+$/, '');
@@ -121,7 +118,10 @@ export default function App() {
         };
 
         const stored: StoredAsset = { sceneId: id, fileName, blob, width, height, originalWidth, originalHeight, updatedAt: new Date().toISOString() };
+        console.log('💾 Saving asset to IndexedDB...');
         await saveAssetToIdb(stored);
+        console.log('✅ Asset saved to IDB.');
+        
         upsertAsset(id, stored);
         newScenes.push(scene);
       }
@@ -139,8 +139,10 @@ export default function App() {
       setImporting(false);
       setImportStatus('');
       showToast(`${newScenes.length} panorama${newScenes.length > 1 ? 's' : ''} imported`);
+      console.log('🎉 Import fully completed!');
+      
     } catch (err: any) {
-      console.error('Import error:', err);
+      console.error('❌ Import error caught:', err);
       setImporting(false);
       setImportStatus('');
       showToast(`Import error: ${err.message || String(err)}`);
@@ -281,12 +283,12 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* Hidden load-project input */}
+      {/* Hidden project load input */}
       <input
         ref={loadProjectInputRef}
         type="file"
         accept="application/json,.json"
-        style={hiddenInputStyle}
+        style={{ display: 'none' }}
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) loadProject(f);
@@ -294,8 +296,22 @@ export default function App() {
         }}
       />
 
+      {/* Hidden panorama upload input - вынесен в корень, чтобы избежать багов */}
+      <input
+        ref={panoramaInputRef}
+        type="file"
+        accept="image/jpeg,image/jpg,image/png,image/tiff,image/tif"
+        multiple
+        style={{ display: 'none' }}
+        onChange={(e) => { 
+          console.log('🔄 input onChange triggered!');
+          handleImportFiles(e.target.files); 
+          e.target.value = ''; 
+        }}
+      />
+
       {/* ── Sidebar ────────────────────────────── */}
-      <aside className="sidebar">
+      <aside className="sidebar" style={{ overflowX: 'hidden' }}>
         <div className="sidebar-header">
           <div className="brand">
             <div className="brand-logo">O</div>
@@ -322,20 +338,16 @@ export default function App() {
             ) : (
               <div 
                 className="drop-zone" 
-                onClick={() => panoramaInputRef.current?.click()}
                 style={{ cursor: 'pointer' }}
+                onClick={() => {
+                  console.log('🖱️ Drop zone clicked!');
+                  if (panoramaInputRef.current) {
+                    panoramaInputRef.current.click();
+                  } else {
+                    console.error('❌ Error: panoramaInputRef.current is null!');
+                  }
+                }}
               >
-                <input
-                  ref={panoramaInputRef}
-                  type="file"
-                  accept="image/jpeg,image/jpg,image/png,image/tiff,image/tif"
-                  multiple
-                  style={hiddenInputStyle}
-                  onChange={(e) => { 
-                    handleImportFiles(e.target.files); 
-                    e.target.value = ''; 
-                  }}
-                />
                 <div className="drop-zone-icon">📷</div>
                 <div className="drop-zone-text">Click to add panoramas</div>
                 <div className="drop-zone-hint">Equirectangular images (2:1 ratio)</div>
