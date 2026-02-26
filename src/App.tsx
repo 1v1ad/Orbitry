@@ -98,7 +98,6 @@ export default function App() {
 
       const newScenes: OrbitryScene[] = [];
 
-      // Классический железобетонный цикл вместо Array.from()
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         if (!file) continue;
@@ -303,7 +302,7 @@ export default function App() {
         ref={loadProjectInputRef}
         type="file"
         accept="application/json,.json"
-        style={{ display: 'none' }}
+        style={hiddenInputStyle}
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) loadProject(f);
@@ -317,7 +316,7 @@ export default function App() {
         type="file"
         accept="image/jpeg,image/jpg,image/png,image/tiff,image/tif"
         multiple
-        style={{ display: 'none' }}
+        style={hiddenInputStyle}
         onChange={(e) => { 
           console.log('🔄 input onChange triggered!');
           handleImportFiles(e.target.files); 
