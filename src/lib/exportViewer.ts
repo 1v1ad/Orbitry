@@ -344,31 +344,49 @@ function buildStandaloneHtml(args: {
  * Fallback path (no FS API): downloads a single HTML with embedded images.
  */
 export async function exportViewer(project: OrbitryProject, assets: Record<string, StoredAsset | undefined>) {
+  const JSZip = (await import('jszip')).default;
+  const zip = new JSZip();
+
   const files = buildViewerFiles(project);
   const exportAssets = await collectAssetsForExport(project, assets);
 
-  // Always download as a single standalone HTML — no scary browser permissions.
+  // Add viewer files to zip root
+  zip.file('index.html', files.indexHtml);
+  zip.file('style.css', files.css);
+  zip.file('marzipano.js', files.marzipanoUmd);
+  zip.file('project.js', files.projectJs);
+  zip.file('viewer.js', files.viewerJs);
+  zip.file('README.txt', files.readme);
+
+  // Add panorama assets
+  const assetsFolder = zip.folder('assets')!;
+  for (const a of exportAssets) {
+    assetsFolder.file(a.fileName, a.blob);
+  }
+
+  // Also add standalone HTML (everything embedded, works offline)
   const embeddedAssets: Record<string, string> = {};
   for (const a of exportAssets) {
     embeddedAssets[a.sceneId] = await blobToDataUrl(a.blob);
   }
-
-  const single = buildStandaloneHtml({
+  const standalone = buildStandaloneHtml({
     project,
     embeddedAssets,
     css: files.css,
     marzipanoUmd: files.marzipanoUmd,
   });
+  zip.file('viewer_standalone.html', standalone);
 
-  const blob = new Blob([single], { type: 'text/html' });
+  // Generate and download .zip
+  const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = safeFileName(`${project.title || 'orbitry'}_viewer.html`);
+  a.download = safeFileName(`${project.title || 'orbitry'}_export.zip`);
   document.body.appendChild(a);
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
 
-  return { ok: true as const, mode: 'single-html' as const };
+  return { ok: true as const, mode: 'zip' as const };
 }
