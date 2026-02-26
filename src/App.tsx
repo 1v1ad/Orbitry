@@ -65,7 +65,7 @@ export default function App() {
         };
       }
 
-      const res = await exportViewer(project, assetsForExport);
+      await exportViewer(project, assetsForExport);
       showToast('Downloaded viewer HTML ✅');
     } catch (e: any) {
       console.error(e);
