@@ -24,6 +24,18 @@ import {
 type AssetMap = Record<string, (StoredAsset & { url: string })>;
 type HotspotMode = 'navigate' | 'info' | 'link';
 
+const hiddenInputStyle: React.CSSProperties = {
+  position: 'absolute',
+  width: '1px',
+  height: '1px',
+  padding: 0,
+  margin: '-1px',
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  borderWidth: 0,
+};
+
 export default function App() {
   const [project, setProject] = useState<OrbitryProject>(() => createEmptyProject('Orbitry MVP'));
   const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
@@ -86,9 +98,12 @@ export default function App() {
 
       const newScenes: OrbitryScene[] = [];
 
-      let idx = 0;
-      for (const file of Array.from(files)) {
-        idx += 1;
+      // Классический железобетонный цикл вместо Array.from()
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        if (!file) continue;
+
+        const idx = i + 1;
         setImportStatus(`Processing ${idx}/${files.length}: ${file.name}`);
         console.log(`⏳ Processing file ${idx}:`, file.name, file.size, file.type);
 
@@ -296,7 +311,7 @@ export default function App() {
         }}
       />
 
-      {/* Hidden panorama upload input - вынесен в корень, чтобы избежать багов */}
+      {/* Hidden panorama upload input */}
       <input
         ref={panoramaInputRef}
         type="file"
