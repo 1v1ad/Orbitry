@@ -37,7 +37,6 @@ export default function App() {
   const [linkTargetSceneId, setLinkTargetSceneId] = useState<string | null>(null);
   const [selectedHotspotId, setSelectedHotspotId] = useState<string | null>(null);
 
-  const importPanoramaInputRef = useRef<HTMLInputElement | null>(null);
   const loadProjectInputRef = useRef<HTMLInputElement | null>(null);
 
   const scenes = project.scenes;
@@ -256,20 +255,12 @@ export default function App() {
 
   return (
     <div className="app">
-      {/* Hidden file inputs */}
-      <input
-        ref={importPanoramaInputRef}
-        type="file"
-        accept="image/jpeg,image/jpg,image/png,image/tiff,image/tif"
-        multiple
-        style={{ display: 'none' }}
-        onChange={(e) => { handleImportFiles(e.target.files); e.target.value = ''; }}
-      />
+      {/* Hidden load-project input (kept outside for simplicity) */}
       <input
         ref={loadProjectInputRef}
+        className="hidden-input"
         type="file"
         accept="application/json,.json"
-        style={{ display: 'none' }}
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) loadProject(f);
@@ -303,11 +294,17 @@ export default function App() {
                 {importStatus}
               </div>
             ) : (
-              <div className="drop-zone" onClick={() => importPanoramaInputRef.current?.click()}>
+              <label className="drop-zone">
+                <input
+                  type="file"
+                  accept="image/jpeg,image/jpg,image/png,image/tiff,image/tif"
+                  multiple
+                  onChange={(e) => { handleImportFiles(e.target.files); e.target.value = ''; }}
+                />
                 <div className="drop-zone-icon">📷</div>
                 <div className="drop-zone-text">Click to add panoramas</div>
                 <div className="drop-zone-hint">Equirectangular images (2:1 ratio)</div>
-              </div>
+              </label>
             )}
           </div>
 
@@ -545,7 +542,6 @@ export default function App() {
               <div
                 className="action-card"
                 onClick={onPublishClick}
-                {...(scenes.length === 0 ? { disabled: true } : {})}
                 style={scenes.length === 0 ? { opacity: 0.35, cursor: 'not-allowed', pointerEvents: 'none' } : {}}
               >
                 <div className="action-icon publish">🚀</div>
