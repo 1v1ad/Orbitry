@@ -258,9 +258,11 @@ export default function App() {
       {/* Hidden load-project input (kept outside for simplicity) */}
       <input
         ref={loadProjectInputRef}
+        id="load-project-upload"
         className="hidden-input"
         type="file"
         accept="application/json,.json"
+        style={{ display: 'none' }}
         onChange={(e) => {
           const f = e.target.files?.[0];
           if (f) loadProject(f);
@@ -269,7 +271,7 @@ export default function App() {
       />
 
       {/* ── Sidebar ────────────────────────────── */}
-      <aside className="sidebar">
+      <aside className="sidebar" style={{ overflowX: 'hidden' }}>
         <div className="sidebar-header">
           <div className="brand">
             <div className="brand-logo">O</div>
@@ -294,11 +296,13 @@ export default function App() {
                 {importStatus}
               </div>
             ) : (
-              <label className="drop-zone">
+              <label htmlFor="panorama-upload" className="drop-zone">
                 <input
+                  id="panorama-upload"
                   type="file"
                   accept="image/jpeg,image/jpg,image/png,image/tiff,image/tif"
                   multiple
+                  style={{ display: 'none' }}
                   onChange={(e) => { handleImportFiles(e.target.files); e.target.value = ''; }}
                 />
                 <div className="drop-zone-icon">📷</div>
