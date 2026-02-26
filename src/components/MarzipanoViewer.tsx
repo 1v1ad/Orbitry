@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import Marzipano from 'marzipano';
 import type { OrbitryHotspot, OrbitryScene, OrbitryViewParameters } from '../lib/project';
 
@@ -35,8 +35,6 @@ export default function MarzipanoViewer({
   const viewerRef = useRef<any | null>(null);
   const currentSceneRef = useRef<any | null>(null);
   const hotspotElsRef = useRef<Map<string, HTMLElement>>(new Map());
-
-  const isReady = useMemo(() => !!scene && !!panoramaUrl, [scene, panoramaUrl]);
 
   // Init viewer once.
   useEffect(() => {
@@ -271,24 +269,6 @@ export default function MarzipanoViewer({
   return (
     <div className="viewerWrap">
       <div ref={containerRef} className="viewer" />
-      <div className="viewerOverlay">
-        <div className="hint">
-          <strong>Orbitry Editor MVP</strong>
-          <div style={{ marginTop: 6 }}>
-            {isReady ? (
-              <>
-                Drag to look around. Switch to <strong>Info</strong> or <strong>Link</strong> in the sidebar to place hotspots.
-              </>
-            ) : (
-              <>Import a 360 equirectangular image (2:1) to start.</>
-            )}
-          </div>
-        </div>
-        <div className="hint" style={{ textAlign: 'right' }}>
-          <div><strong>Scene</strong>: {scene ? scene.name : '—'}</div>
-          <div style={{ marginTop: 4 }}>Hotspots: {hotspots.length}</div>
-        </div>
-      </div>
     </div>
   );
 }
